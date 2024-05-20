@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
-	"os/signal"
 
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
@@ -24,15 +22,16 @@ func main() {
 
 	newChan, _ := conn.Channel()
 
-	amqpChan, queue, err := pubsub.DeclareAndBind(
+	// declare queue game_log* and bind it to peril_topic exchange
+	_, _, err = pubsub.DeclareAndBind(
 		conn,
 		routing.ExchangePerilTopic,
 		routing.GameLogSlug,
 		"game_log.*",
 		pubsub.Durable,
 	)
-	fmt.Println(amqpChan.IsClosed(), queue)
 
+	// print command guidance
 	gamelogic.PrintServerHelp()
 
 	for {
@@ -77,9 +76,4 @@ func main() {
 
 		}
 	}
-
-	// wait for ctrl+c
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt)
-	<-signalChan
 }
