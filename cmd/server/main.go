@@ -22,7 +22,7 @@ func main() {
 
 	newChan, _ := conn.Channel()
 
-	// declare queue game_log* and bind it to peril_topic exchange
+	// declare queue game_log.* and bind it to peril_topic exchange
 	_, _, err = pubsub.DeclareAndBind(
 		conn,
 		routing.ExchangePerilTopic,
@@ -34,13 +34,15 @@ func main() {
 	// print command guidance
 	gamelogic.PrintServerHelp()
 
+ServerREPL:
 	for {
 		cmd := gamelogic.GetInput()
 		if len(cmd) == 0 {
 			continue
 		}
 
-		if cmd[0] == "pause" {
+		switch cmd[0] {
+		case "pause":
 			fmt.Println("Sending a pause message...")
 			err = pubsub.PublishJSON(
 				newChan,
@@ -52,7 +54,7 @@ func main() {
 				log.Fatalf("Failed to publish json file: %v", err)
 			}
 
-		} else if cmd[0] == "resume" {
+		case "resume":
 			fmt.Println("Sending a resume message...")
 			err = pubsub.PublishJSON(
 				newChan,
@@ -64,14 +66,14 @@ func main() {
 				log.Fatalf("Failed to publish json file: %v", err)
 			}
 
-		} else if cmd[0] == "quit" {
+		case "quit":
 			fmt.Println("Exiting the game...")
-			break
+			break ServerREPL
 
-		} else if cmd[0] == "help" {
+		case "help":
 			gamelogic.PrintServerHelp()
 
-		} else {
+		default:
 			log.Fatal("The command is wrong.")
 
 		}

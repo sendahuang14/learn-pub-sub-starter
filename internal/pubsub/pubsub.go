@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
+	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
+	"github.com/bootdotdev/learn-pub-sub-starter/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -13,6 +16,14 @@ type QueueType int
 const (
 	Durable QueueType = iota
 	Transient
+)
+
+type Acktype int
+
+const (
+	Ack Acktype = iota
+	NackRequeue
+	NackDiscard
 )
 
 func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
@@ -46,7 +57,7 @@ func DeclareAndBind(
 		simpleQueueType == Transient,
 		simpleQueueType == Transient,
 		false,
-		nil,
+		amqp.Table{"x-dead-letter-exchange": "peril_dlx"},
 	)
 	if err != nil {
 		return nil, amqp.Queue{}, err
@@ -72,7 +83,7 @@ func SubscribeJSON[T any](
 	queueName,
 	key string,
 	simpleQueueType QueueType,
-	handler func(T),
+	handler func(T) Acktype,
 ) error {
 	// declare a queue and bind it to an exchange
 	newChan, _, err := DeclareAndBind(
@@ -101,12 +112,39 @@ func SubscribeJSON[T any](
 	go func() {
 		for d := range deliveryChan {
 			var g T
-			err = json.Unmarshal(d.Body, g) // json to struct g
+			err = json.Unmarshal(d.Body, &g) // json to struct g
 			if err != nil {
 				break
 			}
-			handler(g)
-			err = d.Ack(false)
+
+			acktype := handler(g)
+
+			switch acktype {
+			case NackRequeue:
+				err = d.Nack(false, true)
+				gamelogic.WriteLog(routing.GameLog{
+					CurrentTime: time.Now(),
+					Message:     "Nack and requeued",
+					Username:    queueName,
+				})
+
+			case NackDiscard:
+				err = d.Nack(false, false)
+				gamelogic.WriteLog(routing.GameLog{
+					CurrentTime: time.Now(),
+					Message:     "Nack and discarded",
+					Username:    queueName,
+				})
+
+			case Ack:
+				err = d.Ack(false)
+				gamelogic.WriteLog(routing.GameLog{
+					CurrentTime: time.Now(),
+					Message:     "Ack",
+					Username:    queueName,
+				})
+			}
+
 			if err != nil {
 				break
 			}

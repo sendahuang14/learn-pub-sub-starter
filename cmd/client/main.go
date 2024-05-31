@@ -10,17 +10,73 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
-	return func(ps routing.PlayingState) {
+func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) pubsub.Acktype {
+	return func(ps routing.PlayingState) pubsub.Acktype {
 		defer fmt.Print("> ")
 		gs.HandlePause(ps)
+		return pubsub.Ack
 	}
 }
 
-func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) {
-	return func(move gamelogic.ArmyMove) {
+func handlerMove(gs *gamelogic.GameState, ch *amqp.Channel) func(gamelogic.ArmyMove) pubsub.Acktype {
+	return func(move gamelogic.ArmyMove) pubsub.Acktype {
 		defer fmt.Print("> ")
-		gs.HandleMove(move)
+
+		mvo := gs.HandleMove(move)
+
+		switch mvo {
+		case gamelogic.MoveOutComeSafe:
+			return pubsub.Ack
+
+		case gamelogic.MoveOutcomeMakeWar:
+			err := pubsub.PublishJSON(
+				ch,
+				routing.ExchangePerilTopic,
+				fmt.Sprintf(
+					"%s.%s",
+					routing.WarRecognitionsPrefix,
+					gs.Player.Username, // username of the user who just received moveoutcome
+				),
+				gamelogic.RecognitionOfWar{
+					Attacker: move.Player,
+					Defender: gs.Player,
+				},
+			)
+			if err != nil {
+				return pubsub.NackRequeue
+			}
+
+			return pubsub.Ack
+
+		case gamelogic.MoveOutcomeSamePlayer:
+			return pubsub.NackDiscard
+
+		default:
+			fmt.Errorf("HandlerMove returned unexpected value")
+			return pubsub.NackDiscard
+		}
+	}
+}
+
+func handlerWar(gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) pubsub.Acktype {
+	return func(rw gamelogic.RecognitionOfWar) pubsub.Acktype {
+		defer fmt.Print(">")
+
+		outcome, _, _ := gs.HandleWar(rw)
+
+		switch outcome {
+		case gamelogic.WarOutcomeNotInvolved:
+			return pubsub.NackRequeue
+
+		case gamelogic.WarOutcomeNoUnits:
+			return pubsub.NackDiscard
+
+		case gamelogic.WarOutcomeOpponentWon, gamelogic.WarOutcomeYouWon, gamelogic.WarOutcomeDraw:
+			return pubsub.Ack
+		default:
+			fmt.Errorf("HandleWar returned unexpected value")
+			return pubsub.NackDiscard
+		}
 	}
 }
 
@@ -77,7 +133,7 @@ func main() {
 		fmt.Sprintf("%s.%s", routing.ArmyMovesPrefix, userName),
 		fmt.Sprintf("%s.*", routing.ArmyMovesPrefix),
 		pubsub.Transient,
-		handlerMove(gs),
+		handlerMove(gs, ch),
 	)
 	if err != nil {
 		fmt.Printf(
@@ -86,20 +142,34 @@ func main() {
 		)
 	}
 
-	// REPL
+	// subscribe to war queue
+	err = pubsub.SubscribeJSON(
+		conn,
+		routing.ExchangePerilTopic,
+		routing.WarRecognitionsPrefix,
+		fmt.Sprintf("%s.*", routing.WarRecognitionsPrefix),
+		pubsub.Durable,
+		handlerWar(gs),
+	)
+	if err != nil {
+		fmt.Printf("Failed to subscribe to war queue")
+	}
+
+ClientREPL:
 	for {
 		cmd := gamelogic.GetInput()
 		if len(cmd) == 0 {
 			continue
 		}
 
-		if cmd[0] == "spawn" {
+		switch cmd[0] {
+		case "spawn":
 			err = gs.CommandSpawn(cmd)
 			if err != nil {
 				log.Fatalf("Failed to spawn a unit: %v", err)
 			}
 
-		} else if cmd[0] == "move" {
+		case "move":
 			move, err := gs.CommandMove(cmd)
 			if err != nil {
 				log.Fatalf("Failed to move unit: %v", err)
@@ -117,22 +187,21 @@ func main() {
 
 			fmt.Println("The move is published successfully")
 
-		} else if cmd[0] == "status" {
+		case "status":
 			gs.CommandStatus()
 
-		} else if cmd[0] == "help" {
+		case "help":
 			gamelogic.PrintClientHelp()
 
-		} else if cmd[0] == "spam" {
+		case "spam":
 			fmt.Println("Spamming not allowed yet!")
 
-		} else if cmd[0] == "quit" {
+		case "quit":
 			gamelogic.PrintQuit()
-			break
+			break ClientREPL
 
-		} else {
+		default:
 			log.Fatal("The command is wrong.")
-
 		}
 	}
 }
