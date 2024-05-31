@@ -10,6 +10,18 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+func handlerLog() func(routing.GameLog) pubsub.Acktype {
+	return func(gamelog routing.GameLog) pubsub.Acktype {
+		defer fmt.Print("> ")
+
+		err := gamelogic.WriteLog(gamelog)
+		if err != nil {
+			return pubsub.NackRequeue
+		}
+		return pubsub.Ack
+	}
+}
+
 func main() {
 	const url = "amqp://guest:guest@localhost:5672/"
 	conn, err := amqp.Dial(url)
@@ -22,14 +34,18 @@ func main() {
 
 	newChan, _ := conn.Channel()
 
-	// declare queue game_log.* and bind it to peril_topic exchange
-	_, _, err = pubsub.DeclareAndBind(
+	// subscribe to game_logs queue
+	err = pubsub.SubscribeGob(
 		conn,
 		routing.ExchangePerilTopic,
 		routing.GameLogSlug,
-		"game_log.*",
+		fmt.Sprintf("%s.*", routing.GameLogSlug),
 		pubsub.Durable,
+		handlerLog(),
 	)
+	if err != nil {
+		fmt.Println("Failed to subscribe to game_logs queue")
+	}
 
 	// print command guidance
 	gamelogic.PrintServerHelp()
