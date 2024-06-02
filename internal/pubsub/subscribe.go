@@ -5,10 +5,7 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
-	"time"
 
-	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
-	"github.com/bootdotdev/learn-pub-sub-starter/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -85,6 +82,11 @@ func subscribe[T any](
 		return fmt.Errorf("Failed to declare and bind a queue: %v", err)
 	}
 
+	err = newChan.Qos(10, 0, false)
+	if err != nil {
+		return fmt.Errorf("Failed to set prefetch size")
+	}
+
 	// deliver queued messages
 	deliveryChan, err := newChan.Consume(
 		queueName,
@@ -109,27 +111,12 @@ func subscribe[T any](
 			switch acktype {
 			case NackRequeue:
 				err = d.Nack(false, true)
-				gamelogic.WriteLog(routing.GameLog{
-					CurrentTime: time.Now(),
-					Message:     "Nack and requeued",
-					Username:    queueName,
-				})
 
 			case NackDiscard:
 				err = d.Nack(false, false)
-				gamelogic.WriteLog(routing.GameLog{
-					CurrentTime: time.Now(),
-					Message:     "Nack and discarded",
-					Username:    queueName,
-				})
 
 			case Ack:
 				err = d.Ack(false)
-				gamelogic.WriteLog(routing.GameLog{
-					CurrentTime: time.Now(),
-					Message:     "Ack",
-					Username:    queueName,
-				})
 			}
 
 			if err != nil {

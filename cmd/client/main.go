@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
@@ -217,7 +218,30 @@ ClientREPL:
 			gamelogic.PrintClientHelp()
 
 		case "spam":
-			fmt.Println("Spamming not allowed yet!")
+			if len(cmd) < 2 {
+				log.Fatal("The command is wrong.")
+			}
+			n, err := strconv.Atoi(cmd[1])
+			if err != nil {
+				log.Fatal("The command is wrong.")
+			}
+
+			for i := 0; i < n; i++ {
+				msg := gamelogic.GetMaliciousLog()
+				err = pubsub.PublishGob(
+					ch,
+					routing.ExchangePerilTopic,
+					fmt.Sprintf("%s.%s", routing.GameLogSlug, userName),
+					routing.GameLog{
+						CurrentTime: time.Now(),
+						Message:     msg,
+						Username:    userName,
+					},
+				)
+				if err != nil {
+					log.Fatalf("Failed to publish spam message: %v", err)
+				}
+			}
 
 		case "quit":
 			gamelogic.PrintQuit()
